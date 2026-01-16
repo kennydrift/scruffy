@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>scruffy | web probing toolkit</title>
+  <style>
+    body { font-family: monospace; margin: 1em; }
+    .copied { color: darkgreen; margin-left: 8px; }
+  </style>
+</head>
+<body>
+<div style="width: 75%;">
+  <h1>scruffy — web probing toolkit</h1>
+
+  <section>
+    <h2>1) View Source</h2>
+    <input id="vs-url" placeholder="https://example.com" size="40">
+    <button id="vs-go">Copy view-source link</button>
+    <span id="vs-status"></span>
+    <div id="vs-out" style="white-space:pre-wrap;margin-top:6px;"></div>
+  </section>
+
+
+
+  <hr>
+
+  <section>
+    <h2>2) About:Blank appended popup</h2>
+    <input id="ab-url" placeholder="url (e.g https://www.example.com/)" size="40">
+    <input id="ab-favicon" placeholder="favicon (defaults to desmos)" size="25">
+    <input id="ab-title" placeholder="page title" size="25">
+    <button id="ab-go" style="margin: 5px;">Append to A:B Popup</button>
+  </section>
+
+  <hr>
+
+  <section>
+    <h2>3) Generate XHR+eval Snippet From CDN</h2>
+    <input id="g-url" placeholder="https://raw.host/your.js" size="40">
+    <input id="g-call" placeholder="functionName(arg1, arg2)" size="25">
+    <button id="g-make">Generate & Copy</button>
+    <button id="g-test" onclick="eval(document.getElementById('g-out').textContent)">Eval Snippet</button>
+    <button onclick="document.getElementById('g-out').textContent = ''">🗑️</button>
+    <input type="checkbox" id="g-corsproxy"> | Wrap w/ CORS proxy |
+    <span id="g-status" style="margin-left:8px;"></span>
+
+    <pre id="g-out" style="background:#f4f4f4;padding:8px;border:1px solid #ddd;white-space:pre-wrap; width: 75%;"></pre>
+
+    <div style="color:rgb(211, 129, 6);font-size:12px;">
+      <b>CORS Tip:</b>
+      <p style="margin: 3px;">- Select “Wrap w/ CORS proxy” to use corsproxy.io automatically</p>
+      <p style="margin: 3px;">- Host files on a CDN with Access-Control-Allow-Origin: *</p>
+      <p style="margin: 3px;">- Use <a href="https://corsproxy.io/" target="_blank">corsproxy.io</a> manually</p>
+    </div>
+
+    <div style="color:#a00;font-size:12px;">
+      <b>Warning</b>: this will execute remote JS via eval. Don’t run untrusted code.
+    </div>
+  </section>
+
+  <hr>
+
+  <div style="color:rgb(211,129,6);font-family:monospace;border:1px dashed #c88;padding:8px;margin-top:10px;">
+    <strong>Disclaimer — Use Responsibly</strong><br>
+    This toolkit is provided <b>for educational, testing, and research purposes only</b>.
+    Do not probe or execute code against systems you do not own or have permission to test.
+  </div>
+</div>
+
+<script>
+  function log(el, msg){ el.textContent = msg }
+
+  // View source
+  document.getElementById('vs-go').addEventListener('click', async () => {
+    const url = document.getElementById('vs-url').value.trim();
+    const out = document.getElementById('vs-out');
+    const status = document.getElementById('vs-status');
+    status.textContent = '';
+
+    if(!url){ log(out, 'Please enter a URL.'); return; }
+
+    const normalized = url.match(/^https?:\/\//) ? url : 'http://' + url;
+    const vs = 'view-source:' + normalized;
+    log(out, vs);
+
+    try {
+      await navigator.clipboard.writeText(vs);
+      status.textContent = 'copied!';
+      status.className = 'copied';
+    } catch {
+      status.textContent = '(copy failed)';
+    }
+  });
+
+  // about:blank injector
+  function injectAboutBlank(url=null, favicon=null, title='AB Appended Page'){
+    const tab = window.open('about:blank', '_blank');
+    if(!tab) return alert('Popup blocked.');
+
+    tab.document.write('<head></head><body></body>');
+    tab.document.close();
+
+    if(favicon){
+      const link = tab.document.createElement('link');
+      link.rel = 'icon';
+      link.href = favicon;
+      tab.document.head.appendChild(link);
+    }
+
+    if(url){
+      const iframe = tab.document.createElement('iframe');
+      iframe.src = url;
+      Object.assign(iframe.style, {
+        position:'absolute', top:0, left:0,
+        width:'100%', height:'100%', border:'none'
+      });
+      tab.document.body.appendChild(iframe);
+    }
+
+    tab.document.title = title;
+  }
+
+  document.getElementById('ab-go').addEventListener('click', () => {
+    injectAboutBlank(
+      document.getElementById('ab-url').value.trim() || null,
+      document.getElementById('ab-favicon').value.trim() || null,
+      document.getElementById('ab-title').value.trim() || 'AB Appended Page'
+    );
+  });
+
+  // XHR + eval generator
+  function el(id){ return document.getElementById(id); }
+
+  el('g-make').addEventListener('click', async () => {
+    const url = el('g-url').value.trim();
+    const call = el('g-call').value.trim() || 'sourceFunction()';
+    const useProxy = el('g-corsproxy').checked;
+    const out = el('g-out');
+    const status = el('g-status');
+
+    if(!url){ out.textContent = 'Enter a content URL.'; return; }
+
+    const finalUrl = useProxy ? 'https://corsproxy.io/?' + url : url;
+    const callSnippet = call.match(/\(.*\)$/) ? call : call + '()';
+
+    const snippet =
+`var req = new XMLHttpRequest();
+req.open('GET', '${finalUrl}');
+req.onload = function(){
+  eval(this.responseText + '\\n${callSnippet};');
+};
+req.send();`;
+
+    out.textContent = snippet;
+    try {
+      await navigator.clipboard.writeText(snippet);
+      status.textContent = 'copied!';
+      status.style.color = 'darkgreen';
+    } catch {
+      status.textContent = '(copy failed)';
+      status.style.color = 'darkred';
+    }
+  });
+</script>
+</body>
+</html>
